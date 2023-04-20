@@ -20,6 +20,8 @@ public class RaycastController : MonoBehaviour
     [HideInInspector]
     public BoxCollider2D boxCollider;
 
+    [SerializeField] bool showGizmos = false;
+
     public virtual void Start()
     {
         boxCollider = GetComponent<BoxCollider2D>();
@@ -33,6 +35,7 @@ public class RaycastController : MonoBehaviour
 
     public void CalculateRaySpacing()
     {
+        // Bound.Expand는 해당 변수값에 0.5값을 곱하여 상하좌우 넒혀서 작동되기에 두배로 곱하여 지정된 변수값으로 넒여지게 만든다
         Bounds bounds = boxCollider.bounds;
         bounds.Expand(skinWidth * -2);
 

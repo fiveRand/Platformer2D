@@ -6,6 +6,7 @@ public class PlayerController : RaycastController
 {
     public CollisionInfo info;
     public Vector3 velocityOld;
+    public int faceDirection;
 
     public override void Start()
     {
@@ -18,12 +19,23 @@ public class PlayerController : RaycastController
         info.Reset();
         velocityOld = velocity;
 
+        if(velocity.x != 0)
+        {
+            faceDirection = (int)Mathf.Sign(velocity.x);
+        }
+
+        HorizontalCollision(ref velocity);
         if(velocity.y != 0)
         {
             VerticalCollision(ref velocity);
         }
 
         transform.Translate(velocity);
+    }
+
+    void HorizontalCollision(ref Vector3 velocity)
+    {
+
     }
 
     void VerticalCollision(ref Vector3 velocity)
@@ -35,14 +47,19 @@ public class PlayerController : RaycastController
             Vector2 rayOrigin = (directionY == -1) ? raycastOrigins.bottomLeft : raycastOrigins.topLeft;
             rayOrigin += Vector2.right * (verticalRaySpacing * i + velocity.x);
             RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.up * directionY, rayLength, collisionMask);
+            
+            
             if(hit)
             {
-                velocity.y = (hit.distance - skinWidth) * directionY;
+               
                 rayLength = hit.distance;
+                velocity.y = (rayLength - skinWidth) * directionY;
+                // 땅바닥에 쏜 레이 길이만큼 밀어내게 만들라고 지시, skinWidth은 rayLength 에서 스킨값을 고려하여 차감함
 
                 info.below = directionY == -1;
                 info.above = directionY == 1;
             }
+
         }
     }
 
@@ -53,7 +70,7 @@ public class PlayerController : RaycastController
         public bool above, below, left, right;
 
         public float slopeAngle, slopeAngleOld;
-
+        
         public void Reset()
         {
             above = below = left = right = false;
