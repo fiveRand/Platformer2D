@@ -4,6 +4,8 @@ using UnityEngine;
 
 public class PlayerController : RaycastController
 {
+    public float maxClimbAngle = 70;
+    public float maxDescendAngle = 70;
     public CollisionInfo info;
     public Vector3 velocityOld;
     public int faceDirection;
@@ -36,6 +38,57 @@ public class PlayerController : RaycastController
     void HorizontalCollision(ref Vector3 velocity)
     {
 
+        float rayLength = Mathf.Abs(velocity.x) + skinWidth;
+
+        for (int i = 0; i < horizontalRayCount; i++)
+        {
+            Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
+            rayOrigin += Vector2.up * (horizontalRaySpacing * i);
+            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, collisionMask);
+
+            if(hit)
+            {
+                float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
+
+                if(i == 0 && slopeAngle <= maxClimbAngle)
+                {
+                    float dist2SlopeStart = 0;
+                    if(slopeAngle != info.slopeAngleOld)
+                    {
+                        dist2SlopeStart = hit.distance - skinWidth;
+                        velocity.x -= dist2SlopeStart * faceDirection;
+                    }
+                    ClimbSlope(ref velocity, slopeAngle);
+                    velocity.x += dist2SlopeStart * faceDirection;
+                }
+
+                if(!info.climbingSlope || slopeAngle > maxClimbAngle)
+                {
+
+                    
+                    velocity.x = (hit.distance - skinWidth) * faceDirection;
+                    rayLength = hit.distance;
+
+                    info.left = faceDirection == -1;
+                    info.right = faceDirection == 1;
+                }
+            }
+        }
+    }
+
+    void ClimbSlope(ref Vector3 velocity,float slopeAngle)
+    {
+        float moveDistance = Mathf.Abs(velocity.x);
+        float climbVelocityY = Mathf.Sin(slopeAngle * Mathf.Deg2Rad) * moveDistance;
+
+        if(velocity.y <= climbVelocityY)
+        {
+            velocity.y = climbVelocityY;
+            velocity.x = Mathf.Cos(slopeAngle * Mathf.Deg2Rad) * moveDistance * Mathf.Sign(velocity.x);
+            info.below = true;
+            info.climbingSlope = true;
+            info.slopeAngle = slopeAngle;
+        }
     }
 
     void VerticalCollision(ref Vector3 velocity)
@@ -68,13 +121,13 @@ public class PlayerController : RaycastController
     public struct CollisionInfo
     {
         public bool above, below, left, right;
-
+        public bool climbingSlope, descendingSlope;
         public float slopeAngle, slopeAngleOld;
         
         public void Reset()
         {
             above = below = left = right = false;
-
+            climbingSlope = descendingSlope = false;
             slopeAngleOld = slopeAngle;
             slopeAngle = 0;
         }
