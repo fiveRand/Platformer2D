@@ -159,13 +159,11 @@ public class PlayerController : RaycastController
         }
         ClimbingSlope(ref velocity);
 
-        if(!info.climbingSlope)
+        HorizontalCollision(ref velocity);
+
+        if (velocity.y != 0)
         {
-            HorizontalCollision(ref velocity);
-            if (velocity.y != 0)
-            {
-                VerticalCollision(ref velocity);
-            }
+            VerticalCollision(ref velocity);
         }
         transform.Translate(velocity);
     }
@@ -174,7 +172,6 @@ public class PlayerController : RaycastController
     {
         float rayLength = Mathf.Abs(velocity.x) + skinWidth;
         Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
-
         var hits = Physics2D.RaycastAll(rayOrigin, Vector2.right * faceDirection, rayLength, collisionMask);
         if (hits.Length > 0)
         {
@@ -240,11 +237,12 @@ public class PlayerController : RaycastController
         if(!info.slidingDownMaxSlope)
         {
             Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
-            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Abs(velocity.y) + skinWidth, layers);
 
             var hits = Physics2D.RaycastAll(rayOrigin, Vector2.down, Mathf.Abs(velocity.y) + skinWidth, layers);
+
             if (hits.Length > 0)
             {
+                RaycastHit2D hit = hits[0];
                 foreach (var rayHit in hits)
                 {
                     if (1 << rayHit.collider.gameObject.layer != throughableMask.value)
@@ -253,10 +251,6 @@ public class PlayerController : RaycastController
                         break;
                     }
                 }
-
-            }
-            if (hit)
-            {
                 float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
                 if (slopeAngle != 0 && slopeAngle <= maxDescendAngle)
                 {
@@ -275,7 +269,7 @@ public class PlayerController : RaycastController
                         /// 만약 해당 이동속도를 넘은 속도로 경사로를 내려가려 할때 경사로 이동을 방지하고 싶다면
                         /// if (rayLength <= cliffTolerance && Mathf.Abs(MaxMoveSpeed) <= moveDist)
 
-                        
+
 
                         if (rayLength <= minYBump)
                         {
@@ -320,21 +314,17 @@ public class PlayerController : RaycastController
         {
             Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
             rayOrigin += Vector2.up * (horizontalRaySpacing * i);
-
             RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, layers);
 
             // Debug.DrawRay(rayOrigin, Vector3.right * faceDirection * rayLength, Color.cyan);
             if(hit)
             {
                 
-                if(hit.distance == 0 || 1 <<hit.collider.gameObject.layer == throughableMask.value) // ThroughPlatform 메서드, 즉 벽 뚫고갈때 충돌을 무시하기 위함
+                if(hit.distance == 0 || throughableMask.value == 1 << hit.collider.gameObject.layer) // ThroughPlatform 메서드, 즉 벽 뚫고갈때 충돌을 무시하기 위함
                 {
                     continue;
                 }
                 
-                // float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
-
-
                 if(!info.climbingSlope)
                 {
                     velocity.x = (hit.distance - skinWidth) * faceDirection;
@@ -359,14 +349,15 @@ public class PlayerController : RaycastController
         float directionY = Mathf.Sign(velocity.y);
         float rayLength = Mathf.Abs(velocity.y) + skinWidth;
         PlatformController controller = null;
+
         for (int i = 0; i < verticalRayCount; i++)
         {
             Vector2 rayOrigin = (directionY == -1) ? raycastOrigins.bottomLeft : raycastOrigins.topLeft;
             rayOrigin += Vector2.right * (verticalRaySpacing * i + velocity.x);
-            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.up * directionY, rayLength, layers);
             var hits = Physics2D.RaycastAll(rayOrigin, Vector2.up * directionY, rayLength, layers);
             if (hits.Length > 0)
             {
+                RaycastHit2D hit = hits[0];
                 foreach(var rayHit in hits)
                 {
 
@@ -376,22 +367,16 @@ public class PlayerController : RaycastController
                         break;
                     }
                 }
-            }
-
-            // Debug.DrawRay(rayOrigin, Vector3.up * directionY * rayLength, Color.cyan);
-
-            if(hit)
-            {
 
 
                 if (controller == null)
                 {
                     controller = hit.transform.GetComponent<PlatformController>();
                 }
-                if (1 <<hit.collider.gameObject.layer == throughableMask.value)
+                if (1 << hit.collider.gameObject.layer == throughableMask.value)
                 {
 
-                    if (directionY == 1 || fallingThroughPlatform || hit.distance == 0)
+                    if (directionY == 1 || hit.distance == 0 ||fallingThroughPlatform)
                     {
                         continue;
                     }
@@ -401,12 +386,12 @@ public class PlayerController : RaycastController
                         continue;
                     }
                 }
-                
+
                 rayLength = hit.distance;
                 velocity.y = (rayLength - skinWidth) * directionY;
                 // 땅바닥에 쏜 레이 길이만큼 밀어내게 만들라고 지시, skinWidth은 rayLength 에서 스킨값을 고려하여 차감함
 
-                if(info.climbingSlope) // 올라가다가 머리 위에 벽이 있을때 
+                if (info.climbingSlope) // 올라가다가 머리 위에 벽이 있을때 
                 {
                     // tan(degree) = y / x
                     // x * tan(degree) = y
@@ -420,6 +405,8 @@ public class PlayerController : RaycastController
                 info.above = directionY == 1;
             }
 
+            // Debug.DrawRay(rayOrigin, Vector3.up * directionY * rayLength, Color.cyan);
+
         }
 
         if (controller != null)
@@ -430,8 +417,8 @@ public class PlayerController : RaycastController
         {
             transform.SetParent(null);
         }
-        
-        if(info.climbingSlope)
+        /*
+        if(!isInsideThroughPlatform && info.climbingSlope)
         {
             rayLength = Mathf.Abs(velocity.x) + skinWidth;
             Vector2 rayOrigin = ((faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight);
@@ -448,7 +435,7 @@ public class PlayerController : RaycastController
                 }
             }
         }
-
+        */
         
 
     }
