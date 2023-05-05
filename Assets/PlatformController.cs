@@ -88,23 +88,6 @@ public class PlatformController : RaycastController
         return Mathf.Pow(x, a) / (Mathf.Pow(x, a) + Mathf.Pow(1 - x, a));
     }
 
-    void MovePassenger(bool beforeMovePlatform)
-    {
-        foreach(var pass in passengers)
-        {
-            if(!passengerDictionary.ContainsKey(pass.transform))
-            {
-                passengerDictionary.Add(pass.transform, pass.transform.GetComponent<PlayerController>());
-
-            }
-            passengerDictionary[pass.transform].velocity = pass.velocity;
-            //passengerDictionary[pass.transform].Move(pass.velocity, true);
-
-
-        }
-        
-    }
-
     void CalculatePassengerMovement(Vector3 velocity)
     {
         HashSet<Transform> movedPassengers = new HashSet<Transform>();

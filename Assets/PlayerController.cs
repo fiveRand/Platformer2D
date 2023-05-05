@@ -5,28 +5,36 @@ using UnityEngine;
 
 public class PlayerController : RaycastController
 {
+    public CollisionInfo info;
+    Vector3 velocityOld;
+    [Header("Jump")]
     public float maxJumpHeight = 4;
     public float minJumpHeight = 1;
     public float timeToJumpApex = .4f;
+    [Range(0.01f, 0.5f)] public float coyoteTime = 0.1f;
+    // 캐릭터가 달려나가 아슬아슬한 땅끝자락으로부터 점프하려고할 때 
+    // 점프입력을 못받아 그대로 추락하는 꼴을 막아준다
+    float lastCoyoteTimer;
+    [Range(0.01f, 0.5f)] public float jumpInputBufferTime = 0.2f;
+    // 점프가 불가능한 상황일때 점프를 눌러 입력받지 않는 걸 방지하여 점프입력의 유연함을 주기위한 값
+    float lastPressedJumpTimer;
+    float gravity;
+    float maxJumpVelocity, minJumpVelocity;
 
     public float accelerationTimeGrounded = .1f;
     public float accelerationTimeAirborne = .3f;
     public float accelerationTimeBreak = .1f;
     public float moveSpeed = 6;
 
-    public float jumpInputBufferSecond = 0.2f;
+    [Header("Wall")]
+    [SerializeField] float wallJumpMultiplier = 0.7f;
+    [SerializeField] bool onWall = false;
+    [Range(0f, 45f)][SerializeField] float wallJumpAngle = 15f;
+    // 45 + 15f = 60f
 
-    float gravity;
-    float maxJumpVelocity, minJumpVelocity;
-    public Vector3 velocity;
+    Vector3 velocity;
     float velocityXSmoothing;
-
-    Vector2 inputVector;
-    PlayerController controller;
-
-    float lastPressedJumpTimer;
-
-    public bool fallingThroughPlatform = false;
+    [Header("Slope")]
     public float maxClimbAngle = 70;
     public float maxDescendAngle = 70;
     /// <summary>
@@ -36,14 +44,15 @@ public class PlayerController : RaycastController
     /// </summary>
     [Range(0, 1)]
     public float cliffDescendTolerance = 0.25f; 
-    public CollisionInfo info;
-    public Vector3 velocityOld;
     public int faceDirection;
+    [Header("Through platform")]
+    public bool fallingThroughPlatform = false;
     public float fallThroughSecond;
-
     public LayerMask throughableMask;
 
-    public int layers;
+    int layers;
+    Vector2 inputVector;
+    PlayerController controller;
 
     public override void Start()
     {
@@ -67,7 +76,7 @@ public class PlayerController : RaycastController
 
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            lastPressedJumpTimer = jumpInputBufferSecond;
+            lastPressedJumpTimer = jumpInputBufferTime;
         }
 
         if (Input.GetKeyUp(KeyCode.Space))
@@ -131,6 +140,17 @@ public class PlayerController : RaycastController
                 velocity.y = maxJumpVelocity;
 
             }
+        }
+        else
+        {
+            if(info.onWall)
+            {
+                faceDirection = -faceDirection;
+                float radian = Mathf.Deg2Rad * (45 + wallJumpAngle);
+                Vector2 wallJumpDirection = new Vector2(faceDirection * Mathf.Cos(radian), Mathf.Sin(radian));
+                velocity = wallJumpDirection * maxJumpVelocity * wallJumpMultiplier;
+            }
+
 
         }
     }
@@ -346,6 +366,7 @@ public class PlayerController : RaycastController
 
     void VerticalCollision(ref Vector3 velocity)
     {
+        bool hitThroughable = false;
         float directionY = Mathf.Sign(velocity.y);
         float rayLength = Mathf.Abs(velocity.y) + skinWidth;
         PlatformController controller = null;
@@ -375,9 +396,11 @@ public class PlayerController : RaycastController
                 }
                 if (1 << hit.collider.gameObject.layer == throughableMask.value)
                 {
+                    hitThroughable = true;
 
                     if (directionY == 1 || hit.distance == 0 ||fallingThroughPlatform)
                     {
+
                         continue;
                     }
                     if (!fallingThroughPlatform && inputVector.y == -1)
@@ -417,25 +440,40 @@ public class PlayerController : RaycastController
         {
             transform.SetParent(null);
         }
-        /*
-        if(!isInsideThroughPlatform && info.climbingSlope)
+        
+        if(info.climbingSlope)
         {
             rayLength = Mathf.Abs(velocity.x) + skinWidth;
             Vector2 rayOrigin = ((faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight);
             rayOrigin += Vector2.up * velocity.y;
-            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, layers);
-            if(hit) // 경사로 올라가는데 다른 각도의 경사로를 만났다면
+            var hits = Physics2D.RaycastAll(rayOrigin, Vector2.right * faceDirection, rayLength, layers);
+            if(hits.Length > 0)
             {
-                float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
-                if(slopeAngle != info.slopeAngle)
+                RaycastHit2D hit = hits[0];
+                foreach (var rayHit in hits)
                 {
-                    velocity.x = (hit.distance - skinWidth) * faceDirection;
-                    info.slopeAngle = slopeAngle;
-                    info.slopeNormal = hit.normal;
+
+                    if (1 << rayHit.collider.gameObject.layer != throughableMask.value)
+                    {
+                        hit = rayHit;
+                        break;
+                    }
+                }
+
+                float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
+
+                if (1 << hit.collider.gameObject.layer != throughableMask.value)
+                {
+                    if (slopeAngle != info.slopeAngle)
+                    {
+                        velocity.x = (hit.distance - skinWidth) * faceDirection;
+                        info.slopeAngle = slopeAngle;
+                        info.slopeNormal = hit.normal;
+                    }
                 }
             }
         }
-        */
+        
         
 
     }
@@ -470,6 +508,13 @@ public class PlayerController : RaycastController
     {
         public bool above, below, left, right;
         public bool climbingSlope, descendingSlope, slidingDownMaxSlope;
+        public bool onWall
+        {
+            get
+            {
+                return (left || right) && !below;
+            }
+        }
         public float slopeAngle, slopeAngleOld;
         public Vector2 slopeNormal;
 
