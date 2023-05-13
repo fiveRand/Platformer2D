@@ -99,12 +99,6 @@ public class PlayerController : RaycastController
         float targetVelocityX = inputVector.x * moveSpeed;
         float accelRate = (info.below) ? accelerationTimeGrounded : accelerationTimeAirborne;
         velocity.x = Mathf.SmoothDamp(velocity.x, targetVelocityX, ref velocityXSmoothing, accelRate);
-
-
-        if(info.onCliff &&inputVector.y < 0)
-        {
-            info.onCliff = false;
-        }
         OnGravity();
 
 
@@ -134,10 +128,7 @@ public class PlayerController : RaycastController
                 velocity.y += gravity * Time.fixedDeltaTime;
             }
         }
-        else if(info.onCliff)
-        {
-            velocity.y = 0;
-        }
+
         else
         {
             velocity.y += gravity * Time.fixedDeltaTime;
@@ -166,13 +157,7 @@ public class PlayerController : RaycastController
         }
         else // if mid-air
         {
-            if(info.onCliff)
-            {
-                faceDirection = -faceDirection;
-                velocity.y = maxJumpVelocity;
-
-            }
-            else if(info.onWall)
+             if(info.onWall)
             {
                 faceDirection = -faceDirection;
                 float radian = Mathf.Deg2Rad * (45 + wallJumpAngle);
@@ -217,65 +202,6 @@ public class PlayerController : RaycastController
         transform.Translate(velocity);
     }
 
-    void CheckCliffDown(ref Vector3 velocity)
-    {
-        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
-        if (inputVector.y < 0)
-        {
-            Vector3 colSize = boxCollider.size;
-            rayOrigin += Vector2.down * verticalRaySpacing;
-            var hit = Physics2D.Raycast(rayOrigin, Vector2.left * faceDirection, colSize.x, layers);
-            if (hit.distance == 0)
-            {
-                return;
-            }
-            if (hit)
-            {
-                
-                float moveAwayX = colSize.x - hit.distance;
-                float offsetY = colSize.y;
-                transform.position += moveAwayX * Vector3.right * faceDirection + Vector3.down * offsetY;
-                faceDirection = -faceDirection;
-            }
-        }
-    }
-
-    void DetectCliff()
-    {
-        Vector3 colSize = boxCollider.bounds.size;
-        float rayLength = Mathf.Abs(velocity.y) + colSize.y;
-        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.topLeft : raycastOrigins.topRight;
-        //var hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, collisionMask);
-        // Debug.DrawRay(rayOrigin, Vector2.right * faceDirection * rayLength,Color.cyan);
-        rayOrigin += Vector2.up * verticalRaySpacing;
-        rayOrigin += Vector2.right * faceDirection * horizontalRaySpacing;
-        var yPosHit = Physics2D.Raycast(rayOrigin, Vector2.down, rayLength, collisionMask);
-        Debug.DrawRay(rayOrigin, Vector2.down * rayLength,Color.cyan);
-
-        if(inputVector.y < 0)
-        {
-            return;
-        }
-
-        if(yPosHit)
-        {
-            Vector3 pos = transform.position;
-            pos.y = yPosHit.point.y - colSize.y * 0.5f;
-            if (yPosHit.distance == 0)
-            {
-                return;
-            }
-            else if(yPosHit.distance <= colSize.y * 0.5f)
-            {
-                info.onCliff = true;
-                velocity.y = 0;
-                velocity.y -= gravity * Time.fixedDeltaTime;
-                transform.position = pos;
-            }
-        }
-        
-
-    }
 
 
 
@@ -605,7 +531,7 @@ public class PlayerController : RaycastController
                 return (left || right) && !below;
             }
         }
-        public bool onCliff;
+
         public float slopeAngle, slopeAngleOld;
         public Vector2 slopeNormal;
 
@@ -618,5 +544,66 @@ public class PlayerController : RaycastController
             slopeAngle = 0;
             slopeNormal = Vector2.zero;
         }
+    }
+
+
+    void CheckCliffDown(ref Vector3 velocity)
+    {
+        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
+        if (inputVector.y < 0)
+        {
+            Vector3 colSize = boxCollider.size;
+            rayOrigin += Vector2.down * verticalRaySpacing;
+            var hit = Physics2D.Raycast(rayOrigin, Vector2.left * faceDirection, colSize.x, layers);
+            if (hit.distance == 0)
+            {
+                return;
+            }
+            if (hit)
+            {
+
+                float moveAwayX = colSize.x - hit.distance;
+                float offsetY = colSize.y;
+                transform.position += moveAwayX * Vector3.right * faceDirection + Vector3.down * offsetY;
+                faceDirection = -faceDirection;
+            }
+        }
+    }
+
+    void DetectCliff()
+    {
+        Vector3 colSize = boxCollider.bounds.size;
+        float rayLength = Mathf.Abs(velocity.y) + colSize.y;
+        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.topLeft : raycastOrigins.topRight;
+        //var hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, collisionMask);
+        // Debug.DrawRay(rayOrigin, Vector2.right * faceDirection * rayLength,Color.cyan);
+        rayOrigin += Vector2.up * verticalRaySpacing;
+        rayOrigin += Vector2.right * faceDirection * horizontalRaySpacing;
+        var yPosHit = Physics2D.Raycast(rayOrigin, Vector2.down, rayLength, collisionMask);
+        Debug.DrawRay(rayOrigin, Vector2.down * rayLength, Color.cyan);
+
+        if (inputVector.y < 0)
+        {
+            return;
+        }
+
+        if (yPosHit)
+        {
+            Vector3 pos = transform.position;
+            pos.y = yPosHit.point.y - colSize.y * 0.5f;
+            if (yPosHit.distance == 0)
+            {
+                return;
+            }
+            else if (yPosHit.distance <= colSize.y * 0.5f)
+            {
+
+                velocity.y = 0;
+                velocity.y -= gravity * Time.fixedDeltaTime;
+                transform.position = pos;
+            }
+        }
+
+
     }
 }
