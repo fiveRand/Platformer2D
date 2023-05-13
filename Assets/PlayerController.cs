@@ -43,7 +43,7 @@ public class PlayerController : RaycastController
     /// 경사로를 타고 내려오게 만들 것인지를 결정함
     /// </summary>
     [Range(0, 1)]
-    public float cliffDescendTolerance = 0.25f; 
+    public float stepTolerance = 0.25f; 
     public int faceDirection;
     [Header("Through platform")]
     public bool fallingThroughPlatform = false;
@@ -52,12 +52,10 @@ public class PlayerController : RaycastController
 
     int layers;
     Vector2 inputVector;
-    PlayerController controller;
 
     public override void Start()
     {
         base.Start();
-        controller = GetComponent<PlayerController>();
 
         layers = throughableMask | collisionMask;
 
@@ -86,33 +84,28 @@ public class PlayerController : RaycastController
                 velocity.y = minJumpVelocity;
             }
         }
-
     }
     public override void FixedUpdate()
     {
         base.FixedUpdate();
         FixedTickTimer();
-        CalculateVelocity();
-        controller.Move(velocity * Time.fixedDeltaTime);
+        InputVelocity();
+        Move(velocity * Time.fixedDeltaTime);
     }
 
-    void CalculateVelocity()
+    void InputVelocity()
     {
-        if (controller.info.above || controller.info.below)
-        {
-            if(controller.info.slidingDownMaxSlope)
-            {
-                velocity.y += -info.slopeNormal.y * gravity * Time.fixedDeltaTime;
-            }
-            else
-            {
-                velocity.y = 0;
-            }
-        }
+
         float targetVelocityX = inputVector.x * moveSpeed;
         float accelRate = (info.below) ? accelerationTimeGrounded : accelerationTimeAirborne;
         velocity.x = Mathf.SmoothDamp(velocity.x, targetVelocityX, ref velocityXSmoothing, accelRate);
-        velocity.y += gravity * Time.fixedDeltaTime;
+
+
+        if(info.onCliff &&inputVector.y < 0)
+        {
+            info.onCliff = false;
+        }
+        OnGravity();
 
 
         if (lastPressedJumpTimer > 0)
@@ -121,13 +114,43 @@ public class PlayerController : RaycastController
 
             lastPressedJumpTimer = 0;
         }
+
+        
+    }
+
+
+    void OnGravity()
+    {
+        if (info.above || info.below)
+        {
+
+            if (info.slidingDownMaxSlope)
+            {
+                velocity.y += -info.slopeNormal.y * gravity * Time.fixedDeltaTime;
+            }
+            else
+            {
+                velocity.y = 0;
+                velocity.y += gravity * Time.fixedDeltaTime;
+            }
+        }
+        else if(info.onCliff)
+        {
+            velocity.y = 0;
+        }
+        else
+        {
+            velocity.y += gravity * Time.fixedDeltaTime;
+        }
+
+    
     }
 
     void OnJump()
     {
-        if (controller.info.below)
+        if (info.below)
         {
-            if(controller.info.slidingDownMaxSlope)
+            if(info.slidingDownMaxSlope)
             {
                 if(inputVector.x != -Mathf.Sign(info.slopeNormal.x))
                 {
@@ -141,17 +164,21 @@ public class PlayerController : RaycastController
 
             }
         }
-        else
+        else // if mid-air
         {
-            if(info.onWall)
+            if(info.onCliff)
+            {
+                faceDirection = -faceDirection;
+                velocity.y = maxJumpVelocity;
+
+            }
+            else if(info.onWall)
             {
                 faceDirection = -faceDirection;
                 float radian = Mathf.Deg2Rad * (45 + wallJumpAngle);
                 Vector2 wallJumpDirection = new Vector2(faceDirection * Mathf.Cos(radian), Mathf.Sin(radian));
                 velocity = wallJumpDirection * maxJumpVelocity * wallJumpMultiplier;
             }
-
-
         }
     }
 
@@ -185,14 +212,78 @@ public class PlayerController : RaycastController
         {
             VerticalCollision(ref velocity);
         }
+
+
         transform.Translate(velocity);
     }
+
+    void CheckCliffDown(ref Vector3 velocity)
+    {
+        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
+        if (inputVector.y < 0)
+        {
+            Vector3 colSize = boxCollider.size;
+            rayOrigin += Vector2.down * verticalRaySpacing;
+            var hit = Physics2D.Raycast(rayOrigin, Vector2.left * faceDirection, colSize.x, layers);
+            if (hit.distance == 0)
+            {
+                return;
+            }
+            if (hit)
+            {
+                
+                float moveAwayX = colSize.x - hit.distance;
+                float offsetY = colSize.y;
+                transform.position += moveAwayX * Vector3.right * faceDirection + Vector3.down * offsetY;
+                faceDirection = -faceDirection;
+            }
+        }
+    }
+
+    void DetectCliff()
+    {
+        Vector3 colSize = boxCollider.bounds.size;
+        float rayLength = Mathf.Abs(velocity.y) + colSize.y;
+        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.topLeft : raycastOrigins.topRight;
+        //var hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, collisionMask);
+        // Debug.DrawRay(rayOrigin, Vector2.right * faceDirection * rayLength,Color.cyan);
+        rayOrigin += Vector2.up * verticalRaySpacing;
+        rayOrigin += Vector2.right * faceDirection * horizontalRaySpacing;
+        var yPosHit = Physics2D.Raycast(rayOrigin, Vector2.down, rayLength, collisionMask);
+        Debug.DrawRay(rayOrigin, Vector2.down * rayLength,Color.cyan);
+
+        if(inputVector.y < 0)
+        {
+            return;
+        }
+
+        if(yPosHit)
+        {
+            Vector3 pos = transform.position;
+            pos.y = yPosHit.point.y - colSize.y * 0.5f;
+            if (yPosHit.distance == 0)
+            {
+                return;
+            }
+            else if(yPosHit.distance <= colSize.y * 0.5f)
+            {
+                info.onCliff = true;
+                velocity.y = 0;
+                velocity.y -= gravity * Time.fixedDeltaTime;
+                transform.position = pos;
+            }
+        }
+        
+
+    }
+
+
 
     void ClimbingSlope(ref Vector3 velocity)
     {
         float rayLength = Mathf.Abs(velocity.x) + skinWidth;
         Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
-        var hits = Physics2D.RaycastAll(rayOrigin, Vector2.right * faceDirection, rayLength, collisionMask);
+        var hits = Physics2D.RaycastAll(rayOrigin, Vector2.right * faceDirection, rayLength, layers);
         if (hits.Length > 0)
         {
             RaycastHit2D hit = hits[0];
@@ -253,6 +344,7 @@ public class PlayerController : RaycastController
             SlideDownMaxSlope(maxSlopeHitLeft, ref velocity);
             SlideDownMaxSlope(maxSlopeHitRight, ref velocity);
         }
+        float cliffTolerance = boxCollider.bounds.size.y * stepTolerance;
         
         if(!info.slidingDownMaxSlope)
         {
@@ -276,7 +368,7 @@ public class PlayerController : RaycastController
                 {
                     if (Mathf.Sign(hit.normal.x) == faceDirection)
                     {
-                        float cliffTolerance = boxCollider.bounds.size.y * cliffDescendTolerance;
+
                         float rayLength = hit.distance - skinWidth;
                         float moveDist = Mathf.Abs(velocity.x);
                         float minYBump = Mathf.Tan(slopeAngle * Mathf.Deg2Rad) * moveDist + cliffTolerance;
@@ -327,7 +419,7 @@ public class PlayerController : RaycastController
 
     void HorizontalCollision(ref Vector3 velocity)
     {
-
+        Vector3 colSize = boxCollider.bounds.size;
         float rayLength = Mathf.Abs(velocity.x) + skinWidth;
 
         for (int i = 0; i < horizontalRayCount; i++)
@@ -339,7 +431,7 @@ public class PlayerController : RaycastController
             // Debug.DrawRay(rayOrigin, Vector3.right * faceDirection * rayLength, Color.cyan);
             if(hit)
             {
-                
+
                 if(hit.distance == 0 || throughableMask.value == 1 << hit.collider.gameObject.layer) // ThroughPlatform 메서드, 즉 벽 뚫고갈때 충돌을 무시하기 위함
                 {
                     continue;
@@ -347,6 +439,7 @@ public class PlayerController : RaycastController
                 
                 if(!info.climbingSlope)
                 {
+
                     velocity.x = (hit.distance - skinWidth) * faceDirection;
                     rayLength = hit.distance;
 
@@ -354,6 +447,24 @@ public class PlayerController : RaycastController
                     {
                         // x 좌표로 쏜 ray로 각도에 탄젠트와 x 속력을 곱해 올라가는 걸 막는다
                         velocity.y = Mathf.Tan(info.slopeAngle * Mathf.Deg2Rad) * Mathf.Abs(velocity.x);
+                    }
+
+                    rayOrigin = (faceDirection == -1) ? raycastOrigins.topLeft : raycastOrigins.topRight;
+                    rayOrigin += Vector2.down * colSize.y * 0.5f;
+                    rayOrigin += Vector2.right * faceDirection * verticalRaySpacing;
+                    RaycastHit2D downHit = Physics2D.Raycast(rayOrigin, Vector2.down, colSize.y * 0.5f, layers);
+                    if (downHit)
+                    {
+                        if (downHit.distance != 0)
+                        {
+                            velocity.x = 0;
+                            Vector3 pos = downHit.point;
+                            pos.x -= colSize.x * 0.5f * faceDirection;
+                            pos.y += colSize.y * 0.5f;
+                            transform.position = pos;
+                            return;
+                        }
+
                     }
 
                     info.left = faceDirection == -1;
@@ -366,7 +477,6 @@ public class PlayerController : RaycastController
 
     void VerticalCollision(ref Vector3 velocity)
     {
-        bool hitThroughable = false;
         float directionY = Mathf.Sign(velocity.y);
         float rayLength = Mathf.Abs(velocity.y) + skinWidth;
         PlatformController controller = null;
@@ -396,7 +506,6 @@ public class PlayerController : RaycastController
                 }
                 if (1 << hit.collider.gameObject.layer == throughableMask.value)
                 {
-                    hitThroughable = true;
 
                     if (directionY == 1 || hit.distance == 0 ||fallingThroughPlatform)
                     {
@@ -427,8 +536,6 @@ public class PlayerController : RaycastController
                 info.below = directionY == -1;
                 info.above = directionY == 1;
             }
-
-            // Debug.DrawRay(rayOrigin, Vector3.up * directionY * rayLength, Color.cyan);
 
         }
 
@@ -478,23 +585,6 @@ public class PlayerController : RaycastController
 
     }
 
-
-    void ClimbSlope(ref Vector3 velocity, float slopeAngle,Vector2 slopeNormal)
-    {
-        float moveDistance = Mathf.Abs(velocity.x);
-        float climbVelocityY = Mathf.Sin(slopeAngle * Mathf.Deg2Rad) * moveDistance;
-
-        if (velocity.y <= climbVelocityY)
-        {
-            velocity.y = climbVelocityY;
-            velocity.x = Mathf.Cos(slopeAngle * Mathf.Deg2Rad) * moveDistance * faceDirection;
-            info.below = true;
-            info.climbingSlope = true;
-            info.slopeAngle = slopeAngle;
-            info.slopeNormal = slopeNormal;
-        }
-    }
-
     IEnumerator FallThorughPlatformRoutine()
     {
         fallingThroughPlatform = true;
@@ -515,6 +605,7 @@ public class PlayerController : RaycastController
                 return (left || right) && !below;
             }
         }
+        public bool onCliff;
         public float slopeAngle, slopeAngleOld;
         public Vector2 slopeNormal;
 
@@ -522,6 +613,7 @@ public class PlayerController : RaycastController
         {
             above = below = left = right = false;
             climbingSlope = descendingSlope =slidingDownMaxSlope = false;
+
             slopeAngleOld = slopeAngle;
             slopeAngle = 0;
             slopeNormal = Vector2.zero;
