@@ -63,6 +63,7 @@ public class PlayerController : RaycastController
     public LayerMask throughableMask;
     public int faceDirection;
 
+    public Vector2 momentum;
     int layers;
     Vector2 inputVector;
 
@@ -118,28 +119,38 @@ public class PlayerController : RaycastController
     {
         get
         {
-            return Mathf.Abs(velocity.x) > minSpeed2Slide && info.onCrounch;
+            return Mathf.Abs(velocity.x) > minSpeed2Slide && info.onCrounch && info.below;
         }
     }
 
     void InputVelocity()
     {
 
+        if(!info.below)
+        {
+            momentum = velocity;
+        }
         if (isSliding)
         {
-            float slopeRadian = info.slopeAngle * Mathf.Deg2Rad;
-            Vector2 slopeVector = new Vector2(Mathf.Cos(slopeRadian), Mathf.Sin(slopeRadian));
-            // velocity.x += slopeVector.y * -gravity * slopeIncreaseMultiplier;
-            //velocity.x += Mathf.Sign(info.slopeNormal.x) * Mathf.Abs(velocity.y) * slopeVector.y;
+            Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
+            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Abs(velocity.y) + skinWidth, layers);
+            if(hit)
+            {
 
-            float ang = Vector2.Angle(velocity.normalized, info.slopeNormal);
-            Debug.Log(ang);
+                Vector2 normal = hit.normal;
+                Vector2 momentumNormalize = momentum.normalized;
+                Debug.Log($"normal : {normal} // momentum : {momentumNormalize} ");
+                float slopeDirection = Mathf.Sign(normal.x);
+                float dir = (slopeDirection == Mathf.Sign(momentum.x)) ? 1 : -1;
 
-            velocity.x -= Mathf.Sign(velocity.x) * Mathf.Abs(slopeVector.x) * drag;
-            velocity.x += Mathf.Sign(info.slopeNormal.x) * slopeVector.y * slopeIncreaseMultiplier;
-            Debug.DrawRay(transform.position, info.slopeNormal, Color.red);
-            Debug.DrawRay(transform.position, velocity.normalized, Color.cyan);
+                velocity.x +=(momentumNormalize.x + normal.x) * Mathf.Abs(momentum.x);
+                velocity.x += dir * Mathf.Sign(velocity.x)*Mathf.Abs(momentumNormalize.y + normal.y) * Mathf.Abs(momentum.y);
+                momentum = Vector2.zero;
+                velocity.x -= Mathf.Sign(velocity.x) * Mathf.Abs(normal.x) * drag;
+                Debug.DrawRay(transform.position, normal, Color.red);
+                Debug.DrawRay(transform.position, momentumNormalize, Color.cyan);
 
+            }
             
 
         }
