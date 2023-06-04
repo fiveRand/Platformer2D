@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -61,12 +61,14 @@ public class PlayerController : RaycastController
     public bool fallingThroughPlatform = false;
     public float fallThroughSecond;
     public LayerMask throughableMask;
+    public LayerMask interactableMask;
     public int faceDirection;
 
     public Vector2 momentum;
     int layers;
     Vector2 inputVector;
-
+    ZipLine zipLine;
+    public bool isOnZipline = false;
     public override void Start()
     {
         base.Start();
@@ -76,10 +78,39 @@ public class PlayerController : RaycastController
         gravity = -(2 * maxJumpHeight) / Mathf.Pow(timeToJumpApex, 2);
         maxJumpVelocity = Mathf.Abs(gravity) * timeToJumpApex;
         minJumpVelocity = Mathf.Sqrt(2 * Mathf.Abs(gravity) * minJumpHeight);
+    }
 
-        float ySize = boxCollider.bounds.size.y;
+    void Interaction()
+    {
+        if(isOnZipline)
+        {
+            isOnZipline = false;
+            return;
+        }
+        zipLine = null;
+        float rayLength = boxCollider.bounds.size.x;
+        int halfHorizontalRayCount = Mathf.CeilToInt(horizontalRayCount * 0.5f);
+        for (int i = 0; i < horizontalRayCount; i++)
+        {
+            Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
+            rayOrigin += Vector2.up * (horizontalRaySpacing * i);
+            var hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, interactableMask);
+            if(hit)
+            {
+                zipLine = hit.transform.GetComponent<ZipLine>();
+                if(zipLine == null)
+                {
+                    zipLine = hit.transform.parent.GetComponent<ZipLine>();
+                }
+                velocity = Vector2.zero;
+                transform.position = zipLine.OnGrab(hit.point);
+                isOnZipline = true;
+                break;
+            }
+        }
 
     }
+
     private void Update()
     {
 
@@ -98,6 +129,11 @@ public class PlayerController : RaycastController
                 velocity.y = minJumpVelocity;
             }
         }
+
+        if(Input.GetKeyDown(KeyCode.E))
+        {
+            Interaction();
+        }
         if(Input.GetKeyDown(KeyCode.C))
         {
             info.onCrounch = true;
@@ -112,6 +148,7 @@ public class PlayerController : RaycastController
         base.FixedUpdate();
         FixedTickTimer();
         InputVelocity();
+
         Move(velocity * Time.fixedDeltaTime);
     }
 
@@ -126,10 +163,11 @@ public class PlayerController : RaycastController
     void InputVelocity()
     {
 
-        if(!info.below)
+        if(!info.below && !isOnZipline)
         {
             momentum = velocity;
         }
+
         if (isSliding)
         {
             Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
@@ -139,20 +177,28 @@ public class PlayerController : RaycastController
 
                 Vector2 normal = hit.normal;
                 Vector2 momentumNormalize = momentum.normalized;
-                Debug.Log($"normal : {normal} // momentum : {momentumNormalize} ");
+                //Debug.Log($"normal : {normal} // momentum : {momentumNormalize} ");
                 float slopeDirection = Mathf.Sign(normal.x);
                 float dir = (slopeDirection == Mathf.Sign(momentum.x)) ? 1 : -1;
 
                 velocity.x +=(momentumNormalize.x + normal.x) * Mathf.Abs(momentum.x);
                 velocity.x += dir * Mathf.Sign(velocity.x)*Mathf.Abs(momentumNormalize.y + normal.y) * Mathf.Abs(momentum.y);
-                momentum = Vector2.zero;
+                momentum = Vector3.zero;
                 velocity.x -= Mathf.Sign(velocity.x) * Mathf.Abs(normal.x) * drag;
-                Debug.DrawRay(transform.position, normal, Color.red);
-                Debug.DrawRay(transform.position, momentumNormalize, Color.cyan);
+                //Debug.DrawRay(transform.position, normal, Color.red);
+                //Debug.DrawRay(transform.position, momentumNormalize, Color.cyan);
 
             }
             
 
+        }
+        else if (isOnZipline)
+        {
+            velocity.x += momentum.x;
+            momentum = Vector3.zero;
+            float speed = zipLine.speed;
+            speed = Mathf.MoveTowards(velocity.magnitude, speed, 0.1f);
+            velocity = zipLine.GetDirection(faceDirection) * speed;
         }
         else
         {
@@ -177,13 +223,18 @@ public class PlayerController : RaycastController
 
             lastPressedJumpTimer = 0;
         }
-
-        
     }
+
+    
 
 
     void OnGravity()
     {
+        if(isOnZipline)
+        {
+            return;
+        }
+
         if (info.above || info.below)
         {
 
@@ -197,7 +248,6 @@ public class PlayerController : RaycastController
                 velocity.y += gravity * Time.fixedDeltaTime;
             }
         }
-
         else
         {
             velocity.y += gravity * Time.fixedDeltaTime;
@@ -254,7 +304,13 @@ public class PlayerController : RaycastController
         {
             faceDirection = (int)Mathf.Sign(velocity.x);
         }
-        if(velocity.y < 0)
+
+        if(isOnZipline)
+        {
+            OnZipLine();
+        }
+
+        if (velocity.y < 0)
         {
             DescendSlope(ref velocity);
         }
@@ -268,6 +324,16 @@ public class PlayerController : RaycastController
 
 
         transform.Translate(velocity);
+    }
+
+    void OnZipLine()
+    {
+
+        if(zipLine.isReachedDestination(faceDirection, transform.position))
+        {
+            isOnZipline = false;
+        }
+
     }
 
 
