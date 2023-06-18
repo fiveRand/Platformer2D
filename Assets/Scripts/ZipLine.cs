@@ -2,7 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class ZipLine : MonoBehaviour
+public class ZipLine : MonoBehaviour,IInteractable
 {
     PolygonCollider2D col;
     LineRenderer lr;
@@ -38,6 +38,13 @@ public class ZipLine : MonoBehaviour
         rightDirection =(BPointer.position - APointer.position).normalized;
         leftDirection = (APointer.position - BPointer.position).normalized;
     }
+
+
+    public void Interaction(PlayerController player)
+    {
+
+    }
+
     public Vector2 OnGrab(Vector2 hitPoint)
     {
         return GetClosestPointOnLine(APointer.position, BPointer.position, hitPoint);
@@ -76,5 +83,10 @@ public class ZipLine : MonoBehaviour
         {
             return start + ab * distance;
         }
+    }
+
+    public void Use()
+    {
+        throw new System.NotImplementedException();
     }
 }

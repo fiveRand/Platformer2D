@@ -5,23 +5,23 @@ using UnityEngine;
 
 public class PlayerController : RaycastController
 {
+    public enum Status
+    {
+        Idle,
+        OnLadder,
+        OnZipline,
+    }
     public CollisionInfo info;
     Vector3 velocityOld;
     public float moveSpeed = 6;
+    public float ladderSpeed = 4;
     public float accelerationTimeGrounded = .8f;
     public float accelerationTimeAirborne = .1f;
     public float crouchSpeed = 2;
 
     [Header("Crouch & Sliding")]
     public float slopeIncreaseMultiplier = 0.2f;
-    public float drag =0.2f;
-    /// <summary>
-    /// slide velocity increasement is based on it's gravity and slope multiplier.
-    /// slope multiplier for example) 30 deg = 0.5, 45 deg = 0.7
-    /// I suggest to try testing many slope (30, 45, 60...)slide to find perfect dragFactor
-    /// </summary>
-    /// 
-
+    [Range(0,1)]public float slidingFriction;
     public float airDrag = 0.01f;
     public float minSpeed2Slide = 3;
 
@@ -44,6 +44,12 @@ public class PlayerController : RaycastController
     [SerializeField] bool onWall = false;
     [Range(0f, 45f)][SerializeField] float wallJumpAngle = 15f;
     // 45 + 15f = 60f
+    [SerializeField] float wallSlideSpeedMax = 3;
+    [SerializeField] float wallStickTime = 0.25f;
+    public float lastWallStickTimer = 0;
+    bool wallSliding;
+
+    int wallDirX;
 
     public Vector3 velocity;
     float velocityXSmoothing;
@@ -62,58 +68,37 @@ public class PlayerController : RaycastController
     public float fallThroughSecond;
     public LayerMask throughableMask;
     public LayerMask interactableMask;
-    public int faceDirection;
 
-    public Vector2 momentum;
+    [Header("Rope")]
+    public float ropeDist = 10;
+    public float ropeSpeed = 10;
+    public RopePhysics ropePhysic;
+
+    int faceDirection;
+    public Status status;
+
+    Vector2 onAirborneVelocity;
+    Vector2 onZiplineVelocity;
+    InteractionAdapter interactAdapter;
     int layers;
     Vector2 inputVector;
-    ZipLine zipLine;
-    public bool isOnZipline = false;
+    [HideInInspector]public ZipLine zipLine;
+    [HideInInspector] public Ladder ladder;
+
+    bool onCrounch;
+
     public override void Start()
     {
         base.Start();
-
+        interactAdapter = new InteractionAdapter();
         layers = throughableMask | collisionMask;
-
         gravity = -(2 * maxJumpHeight) / Mathf.Pow(timeToJumpApex, 2);
         maxJumpVelocity = Mathf.Abs(gravity) * timeToJumpApex;
         minJumpVelocity = Mathf.Sqrt(2 * Mathf.Abs(gravity) * minJumpHeight);
     }
 
-    void Interaction()
-    {
-        if(isOnZipline)
-        {
-            isOnZipline = false;
-            return;
-        }
-        zipLine = null;
-        float rayLength = boxCollider.bounds.size.x;
-        int halfHorizontalRayCount = Mathf.CeilToInt(horizontalRayCount * 0.5f);
-        for (int i = 0; i < horizontalRayCount; i++)
-        {
-            Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
-            rayOrigin += Vector2.up * (horizontalRaySpacing * i);
-            var hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, interactableMask);
-            if(hit)
-            {
-                zipLine = hit.transform.GetComponent<ZipLine>();
-                if(zipLine == null)
-                {
-                    zipLine = hit.transform.parent.GetComponent<ZipLine>();
-                }
-                velocity = Vector2.zero;
-                transform.position = zipLine.OnGrab(hit.point);
-                isOnZipline = true;
-                break;
-            }
-        }
-
-    }
-
     private void Update()
     {
-
         inputVector.x = Input.GetAxisRaw("Horizontal");
         inputVector.y = Input.GetAxisRaw("Vertical");
 
@@ -130,17 +115,87 @@ public class PlayerController : RaycastController
             }
         }
 
+        if(Input.GetKeyDown(KeyCode.Q))
+        {
+            SetRope();
+        }
+
         if(Input.GetKeyDown(KeyCode.E))
         {
             Interaction();
         }
         if(Input.GetKeyDown(KeyCode.C))
         {
-            info.onCrounch = true;
+            onCrounch = true;
         }
         else if(Input.GetKeyUp(KeyCode.C))
         {
-            info.onCrounch = false;
+            onCrounch = false;
+        }
+    }
+
+    bool isOnRope = false;
+    Coroutine ropeRoutine;
+    void SetRope()
+    {
+        Vector3 mousePos = Camera.main.ScreenToWorldPoint(Input.mousePosition);
+        Vector2 dir = mousePos - transform.position;
+        if(ropeRoutine != null)
+        {
+            StopCoroutine(ropeRoutine);
+        }
+        ropeRoutine = StartCoroutine(TryRopeCoroutine(dir));
+        // RaycastHit2D hit = Physics2D.Raycast(transform.position, dir, ropeDist, collisionMask);
+    }
+
+    IEnumerator TryRopeCoroutine(Vector2 direction)
+    {
+        direction.Normalize();
+        RaycastHit2D hit = Physics2D.Raycast(transform.position, direction, ropeDist, collisionMask);
+        float distance = 0;
+        float hitDist = 0;
+        float returnDist = ropeDist;
+
+        bool isReturning = false;
+        if(hit)
+        {
+            hitDist = hit.distance;
+        }
+
+        // Debug.Log(hitDist);
+
+
+        while(true)
+        {
+            if(hit && distance >= hitDist)
+            {
+                ropePhysic.OnHit(transform.position,hit.point,hitDist);
+                Debug.Log($"HitDist {hitDist}, measurement {(ropePhysic.segmentLength * ropePhysic.segmentCount) / hitDist}");
+                break;
+            }
+            else if(distance >= ropeDist)
+            {
+                isReturning = true;
+
+            }
+            
+            if(isReturning)
+            {
+                distance -= ropeSpeed * Time.fixedDeltaTime;
+                if(distance <= 0)
+                {
+                    ropePhysic.OnReturn(transform.position, direction, 0);
+                    break;
+                }
+                ropePhysic.OnReturn(transform.position, direction, distance);
+            }
+            else
+            {
+                distance += ropeSpeed * Time.fixedDeltaTime;
+                ropePhysic.OnShoot(transform.position, direction, distance);
+            }
+            yield return new WaitForFixedUpdate();
+
         }
     }
     public override void FixedUpdate()
@@ -148,74 +203,150 @@ public class PlayerController : RaycastController
         base.FixedUpdate();
         FixedTickTimer();
         InputVelocity();
+        Zipline();
 
         Move(velocity * Time.fixedDeltaTime);
     }
 
-    bool isSliding
+
+    bool isWallSliding
     {
         get
         {
-            return Mathf.Abs(velocity.x) > minSpeed2Slide && info.onCrounch && info.below;
+            return velocity.y < 0 && !info.below && (info.left || info.right);
+        }
+    }
+
+    void Zipline()
+    {
+        if (status == Status.OnZipline)
+        {
+            velocity.x += onZiplineVelocity.x;
+            onZiplineVelocity = Vector3.zero;
+            float speed = Mathf.MoveTowards(velocity.magnitude, zipLine.speed, 0.1f);
+            velocity = zipLine.GetDirection(faceDirection) * speed;
+        }
+        else
+        {
+            onZiplineVelocity = velocity;
+        }
+    }
+
+    
+
+    void WallHandle()
+    {
+        wallDirX = (info.left) ? -1 : 1;
+        wallSliding = false;
+
+
+        if(isWallSliding && wallDirX == faceDirection)
+        {
+            if(lastWallStickTimer > 0)
+            {
+                wallSliding = true;
+                if (velocity.y < -wallSlideSpeedMax)
+                {
+                    velocity.y = -wallSlideSpeedMax;
+                }
+
+                if(inputVector.x == wallDirX || inputVector.x == 0)
+                {
+                    lastWallStickTimer = wallStickTime;
+
+                }
+                else
+                {
+                    lastWallStickTimer -= Time.fixedDeltaTime;
+
+                    if(lastWallStickTimer <= 0)
+                    {
+                        velocity.x = 0;
+                    }
+                }
+            }
+        }
+        else
+        {
+
+            lastWallStickTimer = wallStickTime;
         }
     }
 
     void InputVelocity()
     {
 
-        if(!info.below && !isOnZipline)
+        if(onCrounch)
         {
-            momentum = velocity;
-        }
-
-        if (isSliding)
-        {
-            Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
-            RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Abs(velocity.y) + skinWidth, layers);
-            if(hit)
+            if(info.below)
             {
 
-                Vector2 normal = hit.normal;
-                Vector2 momentumNormalize = momentum.normalized;
-                //Debug.Log($"normal : {normal} // momentum : {momentumNormalize} ");
-                float slopeDirection = Mathf.Sign(normal.x);
-                float dir = (slopeDirection == Mathf.Sign(momentum.x)) ? 1 : -1;
+                Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
+                RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Infinity, layers);
+                if (hit)
+                {
+                    float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
+                    float x = Mathf.Abs(onAirborneVelocity.y) * hit.normal.x;
+                    velocity.x += x;
+                    velocity.x += hit.normal.x * slopeIncreaseMultiplier;
+                    velocity.x -= Mathf.Sign(velocity.x) * Mathf.Cos(slopeAngle) * slidingFriction;
 
-                velocity.x +=(momentumNormalize.x + normal.x) * Mathf.Abs(momentum.x);
-                velocity.x += dir * Mathf.Sign(velocity.x)*Mathf.Abs(momentumNormalize.y + normal.y) * Mathf.Abs(momentum.y);
-                momentum = Vector3.zero;
-                velocity.x -= Mathf.Sign(velocity.x) * Mathf.Abs(normal.x) * drag;
-                //Debug.DrawRay(transform.position, normal, Color.red);
-                //Debug.DrawRay(transform.position, momentumNormalize, Color.cyan);
+                }
 
-            }
-            
-
-        }
-        else if (isOnZipline)
-        {
-            velocity.x += momentum.x;
-            momentum = Vector3.zero;
-            float speed = zipLine.speed;
-            speed = Mathf.MoveTowards(velocity.magnitude, speed, 0.1f);
-            velocity = zipLine.GetDirection(faceDirection) * speed;
-        }
-        else
-        {
-            float acceleration = (info.below) ? accelerationTimeGrounded : accelerationTimeAirborne;
-            if (inputVector.x != 0)
-            {
-                velocity.x += inputVector.x * acceleration;
-                velocity.x = Mathf.Clamp(velocity.x, -moveSpeed, moveSpeed);
+                onAirborneVelocity = Vector2.zero;
             }
             else
             {
-                velocity.x = Mathf.MoveTowards(velocity.x, 0, acceleration);
+                onAirborneVelocity = velocity;
+            }
+        }
+        else if(status == Status.OnLadder)
+        {
+
+            velocity.y = inputVector.y * ladderSpeed;
+
+            if(ladder.isReachedDestination(velocity,transform.position,boxCollider.bounds.size))
+            {
+                velocity.y = 0;
+            }
+        }
+        else if(status == Status.Idle)
+        {
+            float acceleration = (info.below) ? accelerationTimeGrounded : accelerationTimeAirborne;
+            
+
+            if(info.below)
+            {
+                if (inputVector.x != 0)
+                {
+                    velocity.x += inputVector.x * acceleration;
+                    velocity.x = Mathf.Clamp(velocity.x, -moveSpeed, moveSpeed);
+                }
+                else
+                {
+                    velocity.x = Mathf.MoveTowards(velocity.x, 0, acceleration);
+                }
+            }
+            else
+            {
+
+                if(inputVector.x != 0)
+                {
+                    if(Mathf.Abs(velocity.x) > moveSpeed && faceDirection == inputVector.x) // 같은 방향을 바라보는데 현 속도가 최대속력보다 높다
+                    {
+                        acceleration = 0;
+                    }
+                    velocity.x += inputVector.x * acceleration;
+                }
+
             }
         }
 
-        OnGravity();
+        WallHandle();
 
+
+        OnGravity();
+        
 
         if (lastPressedJumpTimer > 0)
         {
@@ -225,12 +356,9 @@ public class PlayerController : RaycastController
         }
     }
 
-    
-
-
     void OnGravity()
     {
-        if(isOnZipline)
+        if(status != Status.Idle)
         {
             return;
         }
@@ -258,6 +386,12 @@ public class PlayerController : RaycastController
 
     void OnJump()
     {
+        if(status != Status.Idle)
+        {
+            velocity.y = maxJumpVelocity ;
+            status = Status.Idle;
+        }
+
         if (info.below)
         {
             if(info.slidingDownMaxSlope)
@@ -276,7 +410,7 @@ public class PlayerController : RaycastController
         }
         else // if mid-air
         {
-             if(info.onWall)
+            if(!info.below && (info.left || info.right) && wallDirX == faceDirection)
             {
                 faceDirection = -faceDirection;
                 float radian = Mathf.Deg2Rad * (45 + wallJumpAngle);
@@ -284,6 +418,31 @@ public class PlayerController : RaycastController
                 velocity = wallJumpDirection * maxJumpVelocity * wallJumpMultiplier;
             }
         }
+    }
+
+    void Interaction()
+    {
+        if (status != Status.Idle)
+        {
+            status = Status.Idle;
+            return;
+        }
+
+        zipLine = null;
+        float rayLength = boxCollider.bounds.size.x;
+        int halfHorizontalRayCount = Mathf.CeilToInt(horizontalRayCount * 0.5f);
+        for (int i = 0; i < horizontalRayCount; i++)
+        {
+            Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomLeft : raycastOrigins.bottomRight;
+            rayOrigin += Vector2.up * (horizontalRaySpacing * i);
+            var hit = Physics2D.Raycast(rayOrigin, Vector2.right * faceDirection, rayLength, interactableMask);
+            if (hit)
+            {
+                interactAdapter.OnInteract(this,hit);
+                break;
+            }
+        }
+
     }
 
 
@@ -305,9 +464,12 @@ public class PlayerController : RaycastController
             faceDirection = (int)Mathf.Sign(velocity.x);
         }
 
-        if(isOnZipline)
+        if(status == Status.OnZipline)
         {
-            OnZipLine();
+            if (zipLine.isReachedDestination(faceDirection, transform.position))
+            {
+                status = Status.Idle;
+            }
         }
 
         if (velocity.y < 0)
@@ -325,18 +487,6 @@ public class PlayerController : RaycastController
 
         transform.Translate(velocity);
     }
-
-    void OnZipLine()
-    {
-
-        if(zipLine.isReachedDestination(faceDirection, transform.position))
-        {
-            isOnZipline = false;
-        }
-
-    }
-
-
 
 
     void ClimbingSlope(ref Vector3 velocity)
@@ -479,7 +629,7 @@ public class PlayerController : RaycastController
     void HorizontalCollision(ref Vector3 velocity)
     {
         Vector3 colSize = boxCollider.bounds.size;
-        float rayLength = Mathf.Abs(velocity.x) + skinWidth;
+        float rayLength = Mathf.Abs(velocity.x) + skinWidth * 2;
 
         for (int i = 0; i < horizontalRayCount; i++)
         {
@@ -487,6 +637,7 @@ public class PlayerController : RaycastController
             rayOrigin += Vector2.up * (horizontalRaySpacing * i);
 
             var hits = Physics2D.RaycastAll(rayOrigin, Vector2.right * faceDirection, rayLength, layers);
+            Debug.DrawRay(rayOrigin, Vector2.right * faceDirection * rayLength, Color.cyan);
             if (hits.Length > 0)
             {
                 RaycastHit2D hit = hits[0];
@@ -516,7 +667,7 @@ public class PlayerController : RaycastController
                         // x 좌표로 쏜 ray로 각도에 탄젠트와 x 속력을 곱해 올라가는 걸 막는다
                         velocity.y = Mathf.Tan(info.slopeAngle * Mathf.Deg2Rad) * Mathf.Abs(velocity.x);
                     }
-                    
+                    /*
                     rayOrigin = (faceDirection == -1) ? raycastOrigins.topLeft : raycastOrigins.topRight;
                     rayOrigin += Vector2.down * colSize.y * 0.5f;
                     rayOrigin += Vector2.right * faceDirection * verticalRaySpacing;
@@ -534,6 +685,7 @@ public class PlayerController : RaycastController
                         }
 
                     }
+                    */
                     
 
                     info.left = faceDirection == -1;
@@ -669,14 +821,6 @@ public class PlayerController : RaycastController
     {
         public bool above, below, left, right;
         public bool climbingSlope, descendingSlope, slidingDownMaxSlope;
-        public bool onWall
-        {
-            get
-            {
-                return (left || right) && !below;
-            }
-        }
-        public bool onCrounch;
 
         public float slopeAngle, slopeAngleOld;
         public Vector2 slopeNormal;
