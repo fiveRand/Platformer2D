@@ -47,7 +47,6 @@ public class PlayerController : RaycastController
     [SerializeField] float wallSlideSpeedMax = 3;
     [SerializeField] float wallStickTime = 0.25f;
     public float lastWallStickTimer = 0;
-    bool wallSliding;
 
     int wallDirX;
 
@@ -203,8 +202,6 @@ public class PlayerController : RaycastController
         base.FixedUpdate();
         FixedTickTimer();
         InputVelocity();
-        Zipline();
-
         Move(velocity * Time.fixedDeltaTime);
     }
 
@@ -216,135 +213,121 @@ public class PlayerController : RaycastController
             return velocity.y < 0 && !info.below && (info.left || info.right);
         }
     }
-
-    void Zipline()
-    {
-        if (status == Status.OnZipline)
-        {
-            velocity.x += onZiplineVelocity.x;
-            onZiplineVelocity = Vector3.zero;
-            float speed = Mathf.MoveTowards(velocity.magnitude, zipLine.speed, 0.1f);
-            velocity = zipLine.GetDirection(faceDirection) * speed;
-        }
-        else
-        {
-            onZiplineVelocity = velocity;
-        }
-    }
-
     
 
     void WallHandle()
     {
         wallDirX = (info.left) ? -1 : 1;
-        wallSliding = false;
-
 
         if(isWallSliding && wallDirX == faceDirection)
         {
+            if (inputVector.x == wallDirX || inputVector.x == 0)
+            {
+                lastWallStickTimer = wallStickTime;
+            }
+
             if(lastWallStickTimer > 0)
             {
-                wallSliding = true;
                 if (velocity.y < -wallSlideSpeedMax)
                 {
                     velocity.y = -wallSlideSpeedMax;
                 }
+            }
+        }
+    }
 
-                if(inputVector.x == wallDirX || inputVector.x == 0)
-                {
-                    lastWallStickTimer = wallStickTime;
+    void OnIdle()
+    {
+        float acceleration;
+        if(info.below)
+        {
 
-                }
-                else
-                {
-                    lastWallStickTimer -= Time.fixedDeltaTime;
+            if (onCrounch)
+            {
+                OnSlide();
+                return;
+            }
 
-                    if(lastWallStickTimer <= 0)
-                    {
-                        velocity.x = 0;
-                    }
-                }
+            acceleration = accelerationTimeGrounded;
+            if (inputVector.x != 0)
+            {
+                velocity.x += inputVector.x * acceleration;
+                velocity.x = Mathf.Clamp(velocity.x, -moveSpeed, moveSpeed);
+            }
+            else
+            {
+                velocity.x = Mathf.MoveTowards(velocity.x, 0, acceleration);
             }
         }
         else
         {
-
-            lastWallStickTimer = wallStickTime;
+            acceleration = accelerationTimeAirborne;
+            if (inputVector.x != 0)
+            {
+                if (Mathf.Abs(velocity.x) > moveSpeed && faceDirection == inputVector.x) // 같은 방향을 바라보는데 현 속도가 최대속력보다 높다
+                {
+                    acceleration = 0;
+                }
+                velocity.x += inputVector.x * acceleration;
+            }
         }
+    }
+
+    void OnSlide()
+    {
+        Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
+        RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Infinity, layers);
+        if (hit)
+        {
+            float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
+            velocity.x += Mathf.Abs(onAirborneVelocity.y) * hit.normal.x;
+            velocity.x += hit.normal.x * slopeIncreaseMultiplier;
+            velocity.x -= Mathf.Sign(velocity.x) * Mathf.Abs(Mathf.Cos(slopeAngle)) * slidingFriction;
+
+        }
+
+        onAirborneVelocity = Vector2.zero;
     }
 
     void InputVelocity()
     {
-
-        if(onCrounch)
+        if (status != Status.OnZipline)
         {
-            if(info.below)
-            {
-
-                Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
-                RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Infinity, layers);
-                if (hit)
-                {
-                    float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
-                    float x = Mathf.Abs(onAirborneVelocity.y) * hit.normal.x;
-                    velocity.x += x;
-                    velocity.x += hit.normal.x * slopeIncreaseMultiplier;
-                    velocity.x -= Mathf.Sign(velocity.x) * Mathf.Cos(slopeAngle) * slidingFriction;
-
-                }
-
-                onAirborneVelocity = Vector2.zero;
-            }
-            else
-            {
-                onAirborneVelocity = velocity;
-            }
+            onZiplineVelocity = velocity;
         }
-        else if(status == Status.OnLadder)
+        if(!info.below)
         {
-
-            velocity.y = inputVector.y * ladderSpeed;
-
-            if(ladder.isReachedDestination(velocity,transform.position,boxCollider.bounds.size))
-            {
-                velocity.y = 0;
-            }
+            onAirborneVelocity = velocity;
         }
-        else if(status == Status.Idle)
+
+        switch(status)
         {
-            float acceleration = (info.below) ? accelerationTimeGrounded : accelerationTimeAirborne;
-            
+            case Status.Idle:
+                OnIdle();
+                break;
 
-            if(info.below)
-            {
-                if (inputVector.x != 0)
+                case Status.OnLadder:
+                velocity.y = inputVector.y * ladderSpeed;
+                if (ladder.isReachedDestination(velocity, transform.position, boxCollider.bounds.size))
                 {
-                    velocity.x += inputVector.x * acceleration;
-                    velocity.x = Mathf.Clamp(velocity.x, -moveSpeed, moveSpeed);
+                    velocity.y = 0;
                 }
-                else
-                {
-                    velocity.x = Mathf.MoveTowards(velocity.x, 0, acceleration);
-                }
-            }
-            else
-            {
+                break;
 
-                if(inputVector.x != 0)
-                {
-                    if(Mathf.Abs(velocity.x) > moveSpeed && faceDirection == inputVector.x) // 같은 방향을 바라보는데 현 속도가 최대속력보다 높다
-                    {
-                        acceleration = 0;
-                    }
-                    velocity.x += inputVector.x * acceleration;
-                }
+                case Status.OnZipline:
+                velocity.x += onZiplineVelocity.x;
+                onZiplineVelocity = Vector3.zero;
+                float speed = Mathf.MoveTowards(velocity.magnitude, zipLine.speed, 0.1f);
+                velocity = zipLine.GetDirection(faceDirection) * speed;
 
-            }
+                if (zipLine.isReachedDestination(faceDirection, transform.position))
+                {
+                    status = Status.Idle;
+                }
+                break;
         }
 
         WallHandle();
-
-
         OnGravity();
         
 
@@ -452,6 +435,11 @@ public class PlayerController : RaycastController
         {
             lastPressedJumpTimer -= Time.fixedDeltaTime;
         }
+
+        if(lastWallStickTimer > 0)
+        {
+            lastWallStickTimer -= Time.fixedDeltaTime;
+        }
     }
 
     public void Move(Vector3 velocity)
@@ -462,14 +450,6 @@ public class PlayerController : RaycastController
         if (velocity.x != 0)
         {
             faceDirection = (int)Mathf.Sign(velocity.x);
-        }
-
-        if(status == Status.OnZipline)
-        {
-            if (zipLine.isReachedDestination(faceDirection, transform.position))
-            {
-                status = Status.Idle;
-            }
         }
 
         if (velocity.y < 0)
