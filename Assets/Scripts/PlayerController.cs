@@ -76,7 +76,7 @@ public class PlayerController : RaycastController
     int faceDirection;
     public Status status;
 
-    Vector2 onAirborneVelocity;
+    public Vector2 onAirborneVelocity;
     Vector2 onZiplineVelocity;
     InteractionAdapter interactAdapter;
     int layers;
@@ -285,6 +285,7 @@ public class PlayerController : RaycastController
                 OnSlide();
                 return;
             }
+            onAirborneVelocity = Vector2.zero;
 
             acceleration = accelerationTimeGrounded;
             if (inputVector.x != 0)
@@ -299,6 +300,7 @@ public class PlayerController : RaycastController
         }
         else
         {
+            onAirborneVelocity = velocity;
             acceleration = accelerationTimeAirborne;
             if (inputVector.x != 0)
             {
@@ -313,14 +315,18 @@ public class PlayerController : RaycastController
 
     void OnSlide()
     {
+
         Vector2 rayOrigin = (faceDirection == -1) ? raycastOrigins.bottomRight : raycastOrigins.bottomLeft;
         RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.down, Mathf.Infinity, layers);
         if (hit)
         {
             float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
-            velocity.x += Mathf.Abs(onAirborneVelocity.y) * hit.normal.x;
-            velocity.x += hit.normal.x * slopeIncreaseMultiplier;
             velocity.x -= Mathf.Sign(velocity.x) * Mathf.Abs(Mathf.Cos(slopeAngle)) * slidingFriction;
+            velocity.x += hit.normal.x * slopeIncreaseMultiplier;
+
+            
+            velocity.x += Mathf.Abs(onAirborneVelocity.y) * hit.normal.x;
+
 
         }
 
@@ -333,10 +339,7 @@ public class PlayerController : RaycastController
         {
             onZiplineVelocity = velocity;
         }
-        if(!info.below)
-        {
-            onAirborneVelocity = velocity;
-        }
+
 
         switch(status)
         {
